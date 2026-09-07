@@ -1,7 +1,0 @@
-torch
-transformers
-sounddevice
-soundfile
-openai
-numpy
-faster-whisper

@@ -74,6 +74,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _merge_config(args: argparse.Namespace, config: tp.Dict[str, tp.Any]) -> tp.Dict[str, tp.Any]:
+    """
+    Merge command line arguments with config file values
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command line arguments.
+    config : dict
+        Configuration loaded from a file.
+    
+    Returns
+    -------
+    merged : dict
+        Merged configuration, with command line arguments taking precedence.
+    """
     merged = dict(config)
     for key in (
         "model", "language", "device", "api_key", "base_url",
@@ -102,7 +117,19 @@ def _apply_defaults(cfg: tp.Dict[str, tp.Any]) -> tp.Dict[str, tp.Any]:
 
 
 def _build_transcriber(cfg: tp.Dict[str, tp.Any]) -> tp.Any:
-    """Create a WhisperLocal or WhisperAPI instance from merged config"""
+    """
+    Create a WhisperLocal or WhisperAPI instance from merged config
+
+    Parameters
+    ----------
+    cfg : dict
+        Merged configuration from command line and config file.
+
+    Returns
+    -------
+    transcriber : object
+        An instance of WhisperLocal or WhisperAPI.
+    """
     cfg = _apply_defaults(cfg)
     language = None if cfg["language"] == "auto" else cfg["language"]
     noise_reduction = float(cfg["noise_reduction"])
@@ -129,7 +156,6 @@ def _build_transcriber(cfg: tp.Dict[str, tp.Any]) -> tp.Any:
 
 
 def _run_files(args: argparse.Namespace, config: tp.Dict[str, tp.Any]) -> int:
-    """Transcribe one or more audio files"""
     cfg = _merge_config(args, config)
     transcriber = _build_transcriber(cfg)
 

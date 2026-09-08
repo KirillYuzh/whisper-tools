@@ -63,7 +63,14 @@ class WhisperAPI:
         self._async_client = None
 
     def _get_async_client(self) -> tp.Any:
-        """Create and cache the async OpenAI client"""
+        """
+        Create and cache the async OpenAI client
+
+        Returns
+        -------
+        async_client : object
+            An instance of AsyncOpenAI for making asynchronous requests.
+        """
         if self._async_client is None:
             from openai import AsyncOpenAI
 
@@ -180,7 +187,21 @@ class WhisperAPI:
         return save_temp_wav(data, TARGET_SAMPLE_RATE)
 
     def _request_with_retry(self, path: str, prompt: tp.Optional[str]) -> TranscriptionResult:
-        """Send a transcription request with exponential backoff"""
+        """
+        Send a transcription request with exponential backoff
+
+        Parameters
+        ----------
+        path : str
+            Path to the audio file.
+        prompt : str | None
+            Prompt for the transcription.
+
+        Returns
+        -------
+        result : TranscriptionResult
+            Transcription result.
+        """
         for attempt in range(self.max_retries + 1):
             try:
                 return self._request(path, prompt)
@@ -192,7 +213,21 @@ class WhisperAPI:
     async def _request_async_with_retry(
         self, path: str, prompt: tp.Optional[str]
     ) -> TranscriptionResult:
-        """Send an async transcription request with exponential backoff"""
+        """
+        Send an async transcription request with exponential backoff
+        
+        Parameters
+        ----------
+        path : str
+            Path to the audio file.
+        prompt : str | None
+            Prompt for the transcription.
+        
+        Returns
+        -------
+        result : TranscriptionResult
+            Transcription result.
+        """
         for attempt in range(self.max_retries + 1):
             try:
                 return await self._request_async(path, prompt)
@@ -202,7 +237,22 @@ class WhisperAPI:
                 await asyncio.sleep(2**attempt)
 
     def _request(self, path: str, prompt: tp.Optional[str]) -> TranscriptionResult:
-        """Perform a single **sync** transcription request"""
+        """
+        ## Sync
+        Perform a single sync transcription request
+
+        Parameters
+        ----------
+        path : str
+            Path to the audio file.
+        prompt : str | None
+            Prompt for the transcription.
+
+        Returns
+        -------
+        result : TranscriptionResult
+            Transcription result.
+        """
         kwargs = {
             "model": self.model,
             "response_format": "verbose_json",
@@ -218,7 +268,22 @@ class WhisperAPI:
         return _parse_response(result)
 
     async def _request_async(self, path: str, prompt: tp.Optional[str]) -> TranscriptionResult:
-        """Perform a single **async** transcription request"""
+        """
+        ## Async
+        Perform a single async transcription request
+
+        Parameters
+        ----------
+        path : str
+            Path to the audio file.
+        prompt : str | None
+            Prompt for the transcription.
+    
+        Returns
+        -------
+        result : TranscriptionResult
+            Transcription result.
+        """
         kwargs = {
             "model": self.model,
             "response_format": "verbose_json",

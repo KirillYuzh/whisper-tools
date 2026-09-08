@@ -7,7 +7,7 @@ class Segment:
     """
     A timed piece of transcribed text
 
-    Parameters
+    Data
     ----------
     start : float
         Start time in seconds.
@@ -30,7 +30,7 @@ class TranscriptionResult:
     """
     Result of a transcription call
 
-    Parameters
+    Data
     ----------
     text : str
         Full transcribed text.
@@ -57,7 +57,7 @@ class SpeakerTurn:
     """
     A speaker turn from diarization
 
-    Parameters
+    Data
     ----------
     start : float
         Start time in seconds.

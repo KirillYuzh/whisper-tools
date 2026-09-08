@@ -33,7 +33,7 @@ class Diarizer:
         self._pipeline = None
 
     def _load(self) -> tp.Any:
-        """Load and cache the pyannote pipeline."""
+        """Load and cache the pyannote pipeline"""
         if self._pipeline is None:
             from pyannote.audio import Pipeline
 

@@ -51,7 +51,6 @@ class WhisperLocal:
         self._model = None
 
     def _load(self) -> tp.Any:
-        """Load and cache the faster-whisper model."""
         if self._model is None:
             from faster_whisper import WhisperModel
 

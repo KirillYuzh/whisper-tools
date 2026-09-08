@@ -2,8 +2,8 @@ import typing as tp
 
 import numpy as np
 
-from whisper_tools.audio import TARGET_SAMPLE_RATE, load_audio, resample
-from whisper_tools.types import SpeakerTurn
+from whisper_tools.audio import TARGET_SAMPLE_RATE, cleanup_temp, convert_to_wav, load_audio, resample
+from whisper_tools.types import Segment, SpeakerTurn
 
 
 class Diarizer:
@@ -62,9 +62,11 @@ class Diarizer:
         turns : list of SpeakerTurn
             Speaker turns sorted by start time.
         """
-        import torch
-
+        converted_temp = None
         if isinstance(audio, str):
+            if not audio.lower().endswith(".wav"):
+                converted_temp = convert_to_wav(audio)
+                audio = converted_temp
             data, rate = load_audio(audio, TARGET_SAMPLE_RATE)
         else:
             data = np.asarray(audio, dtype=np.float32)
@@ -74,6 +76,8 @@ class Diarizer:
                 data = resample(data, sample_rate, TARGET_SAMPLE_RATE)
             rate = TARGET_SAMPLE_RATE
 
+        import torch
+
         waveform = torch.from_numpy(data).unsqueeze(0)
         diarization = self._load()({"waveform": waveform, "sample_rate": rate})
 
@@ -81,7 +85,43 @@ class Diarizer:
             SpeakerTurn(start=turn.start, end=turn.end, speaker=speaker)
             for turn, _, speaker in diarization.itertracks(yield_label=True)
         ]
+        if converted_temp is not None:
+            cleanup_temp(converted_temp)
         return sorted(turns, key=lambda t: t.start)
+
+
+def assign_speakers(
+    segments: tp.List[Segment],
+    turns: tp.List[SpeakerTurn],
+) -> None:
+    """Assign speaker labels to transcription segments.
+
+    Each segment gets the speaker whose turn overlaps the most with
+    the segment's midpoint.
+
+    Parameters
+    ----------
+    segments : list of Segment
+        Transcription segments (mutated in place).
+    turns : list of SpeakerTurn
+        Speaker turns from diarization.
+    """
+    for seg in segments:
+        mid = (seg.start + seg.end) / 2
+        for turn in turns:
+            if turn.start <= mid <= turn.end:
+                seg.speaker = turn.speaker
+                break
+        else:
+            best = None
+            best_overlap = 0.0
+            for turn in turns:
+                overlap = min(seg.end, turn.end) - max(seg.start, turn.start)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best = turn.speaker
+            if best is not None:
+                seg.speaker = best
 
 
 def diarize(

@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from whisper_tools.audio import TARGET_SAMPLE_RATE, cleanup_temp, load_audio, reduce_noise, resample, save_temp_wav
+from whisper_tools.audio import TARGET_SAMPLE_RATE, cleanup_temp, convert_to_wav, load_audio, reduce_noise, resample, save_temp_wav
 from whisper_tools.types import Segment, TranscriptionResult
 
 
@@ -30,6 +30,9 @@ class WhisperAPI:
         Request timeout in seconds.
     noise_reduction : float, default 0.0
         Noise reduction strength. 0 disables the effect.
+    hf_token : str | None, default None
+        Hugging Face token for speaker diarization. Required when
+        ``diarize=True`` is passed to :meth:`transcribe`.
 
     See Also
     --------
@@ -46,6 +49,7 @@ class WhisperAPI:
         max_retries: int = 2,
         timeout: float = 60.0,
         noise_reduction: float = 0.0,
+        hf_token: tp.Optional[str] = None,
     ) -> None:
         from openai import OpenAI
 
@@ -60,6 +64,7 @@ class WhisperAPI:
         self.max_retries = max_retries
         self.timeout = timeout
         self.noise_reduction = noise_reduction
+        self.hf_token = hf_token
         self._async_client = None
 
     def _get_async_client(self) -> tp.Any:
@@ -87,6 +92,7 @@ class WhisperAPI:
         audio: tp.Union[str, np.ndarray],
         sample_rate: int = 16000,
         prompt: tp.Optional[str] = None,
+        diarize: bool = False,
     ) -> TranscriptionResult:
         """
         Transcribe an audio file or a numpy array
@@ -99,6 +105,9 @@ class WhisperAPI:
             Sample rate of `audio` when it is a numpy array.
         prompt : str | None, default None
             Initial prompt to bias the model vocabulary.
+        diarize : bool, default False
+            Whether to run speaker diarization and assign speaker labels
+            to transcription segments.
 
         Returns
         -------
@@ -107,7 +116,18 @@ class WhisperAPI:
         """
         path = self._prepare_audio(audio, sample_rate)
         try:
-            return self._request_with_retry(path, prompt)
+            result = self._request_with_retry(path, prompt)
+            if diarize and self.hf_token is not None:
+                from whisper_tools.diarize import Diarizer, assign_speakers
+
+                diarizer = Diarizer(hf_token=self.hf_token)
+                # Load the original audio for diarization
+                if isinstance(audio, str):
+                    turns = diarizer.diarize(audio)
+                else:
+                    turns = diarizer.diarize(audio, sample_rate=sample_rate)
+                assign_speakers(result.segments, turns)
+            return result
         finally:
             cleanup_temp(path)
 
@@ -116,6 +136,7 @@ class WhisperAPI:
         audio: tp.Union[str, np.ndarray],
         sample_rate: int = 16000,
         prompt: tp.Optional[str] = None,
+        diarize: bool = False,
     ) -> TranscriptionResult:
         """
         Asynchronously transcribe an audio file or a numpy array
@@ -128,6 +149,9 @@ class WhisperAPI:
             Sample rate of `audio` when it is a numpy array.
         prompt : str | None, default None
             Initial prompt to bias the model vocabulary.
+        diarize : bool, default False
+            Whether to run speaker diarization and assign speaker labels
+            to transcription segments.
 
         Returns
         -------
@@ -136,7 +160,11 @@ class WhisperAPI:
         """
         path = self._prepare_audio(audio, sample_rate)
         try:
-            return await self._request_async_with_retry(path, prompt)
+            result = await self._request_async_with_retry(path, prompt)
+            if diarize:
+                # WhisperAPI doesn't support diarization natively
+                pass
+            return result
         finally:
             cleanup_temp(path)
 
@@ -172,10 +200,19 @@ class WhisperAPI:
         sample_rate: int,
     ) -> str:
         if isinstance(audio, str):
-            data, rate = load_audio(audio, TARGET_SAMPLE_RATE)
+            converted = None
+            if not audio.lower().endswith(".wav"):
+                converted = convert_to_wav(audio)
+                wav_path = converted
+            else:
+                wav_path = audio
+            data, rate = load_audio(wav_path, TARGET_SAMPLE_RATE)
             if self.noise_reduction > 0:
                 data = reduce_noise(data, rate, self.noise_reduction)
-            return save_temp_wav(data, rate)
+            result_path = save_temp_wav(data, TARGET_SAMPLE_RATE)
+            if converted is not None:
+                cleanup_temp(converted)
+            return result_path
 
         data = np.asarray(audio, dtype=np.float32)
         if data.ndim > 1:

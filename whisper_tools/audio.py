@@ -8,6 +8,37 @@ import numpy as np
 TARGET_SAMPLE_RATE = 16000
 
 
+def convert_to_wav(path: str, output_path: tp.Optional[str] = None) -> str:
+    """
+    Convert any audio format to WAV (16kHz, mono, f32le) using ffmpeg.
+
+    Parameters
+    ----------
+    path : str
+        Path to the input audio file.
+    output_path : str | None, default None
+        Path for the output WAV file. If None, a temp file is created.
+
+    Returns
+    -------
+    str
+        Path to the converted WAV file.
+    """
+    import os
+
+    if output_path is None:
+        fd, output_path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+
+    cmd = [
+        "ffmpeg", "-v", "error", "-i", str(path),
+        "-f", "f32le", "-ac", "1", "-ar", str(TARGET_SAMPLE_RATE), "-y",
+        str(output_path),
+    ]
+    subprocess.run(cmd, capture_output=True, check=True)
+    return str(output_path)
+
+
 def load_audio(path: str, sample_rate: int = TARGET_SAMPLE_RATE) -> tp.Tuple[int, np.ndarray]:
     """
     Load an audio file and resample it to the target rate
@@ -15,8 +46,8 @@ def load_audio(path: str, sample_rate: int = TARGET_SAMPLE_RATE) -> tp.Tuple[int
     Parameters
     ----------
     path : str
-        Path to an audio file. Formats supported by soundfile are read
-        directly; anything else is converted through ffmpeg.
+        Path to an audio file. WAV files are read directly by soundfile;
+        other formats are decoded through ffmpeg.
     sample_rate : int, default 16000
         Target sample rate.
 
@@ -25,17 +56,24 @@ def load_audio(path: str, sample_rate: int = TARGET_SAMPLE_RATE) -> tp.Tuple[int
     (sample_rate, audio) : tuple of (int, ndarray)
         Actual sample rate and mono float32 samples.
     """
-    try:
-        import soundfile as sf
+    path = str(path)
+    if path.lower().endswith(".wav"):
+        try:
+            import soundfile as sf
 
-        data, rate = sf.read(path, dtype="float32")
-    except Exception:
+            data, rate = sf.read(path, dtype="float32")
+            data = np.asarray(data, dtype=np.float32)
+        except Exception:
+            data, rate = _read_with_ffmpeg(path)
+            data = np.asarray(data, dtype=np.float32)
+    else:
         data, rate = _read_with_ffmpeg(path)
+        data = np.asarray(data, dtype=np.float32)
 
-    if data.ndim > 1:
-        data = data[:, 0]
-    if rate != sample_rate:
-        data = resample(data, rate, sample_rate)
+    if data.ndim > 1:  # type: ignore[union-attr]
+        data = data[:, 0]  # type: ignore[index]
+    if rate != sample_rate:  # type: ignore[union-comparison]
+        data = resample(data, rate, sample_rate)  # type: ignore[arg-type]
     return sample_rate, data.astype(np.float32)
 
 

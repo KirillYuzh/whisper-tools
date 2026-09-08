@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from whisper_tools.audio import TARGET_SAMPLE_RATE, load_audio, reduce_noise, resample, split_chunks
+from whisper_tools.audio import TARGET_SAMPLE_RATE, cleanup_temp, convert_to_wav, load_audio, reduce_noise, resample, split_chunks
 from whisper_tools.types import Segment, TranscriptionResult
 
 
@@ -41,6 +41,7 @@ class WhisperLocal:
         chunk_seconds: float = 30.0,
         overlap_seconds: float = 2.0,
         noise_reduction: float = 0.0,
+        hf_token: tp.Optional[str] = None,
     ) -> None:
         self.model_name = model
         self.language = language
@@ -48,6 +49,7 @@ class WhisperLocal:
         self.chunk_seconds = chunk_seconds
         self.overlap_seconds = overlap_seconds
         self.noise_reduction = noise_reduction
+        self.hf_token = hf_token
         self._model = None
 
     def _load(self) -> tp.Any:
@@ -69,6 +71,7 @@ class WhisperLocal:
         sample_rate: int = 16000,
         prompt: tp.Optional[str] = None,
         word_timestamps: bool = False,
+        diarize: bool = False,
     ) -> TranscriptionResult:
         """
         Transcribe an audio file or a numpy array
@@ -83,13 +86,20 @@ class WhisperLocal:
             Initial prompt to bias the model vocabulary.
         word_timestamps : bool, default False
             Whether to include word-level timestamps in segments.
+        diarize : bool, default False
+            Whether to run speaker diarization and assign speaker labels
+            to transcription segments.
 
         Returns
         -------
         result : TranscriptionResult
             Transcribed text with segments, language and duration.
         """
+        converted_temp = None
         if isinstance(audio, str):
+            if not audio.lower().endswith(".wav"):
+                converted_temp = convert_to_wav(audio)
+                audio = converted_temp
             data, rate = load_audio(audio, TARGET_SAMPLE_RATE)
         else:
             data = np.asarray(audio, dtype=np.float32)
@@ -102,21 +112,32 @@ class WhisperLocal:
         if self.noise_reduction > 0:
             data = reduce_noise(data, rate, self.noise_reduction)
 
-        duration = len(data) / rate
+        duration = float(len(data) / rate)
         if duration <= self.chunk_seconds:
-            return self._transcribe_chunk(data, rate, prompt, word_timestamps, offset=0.0)
+            result = self._transcribe_chunk(data, rate, prompt, word_timestamps, offset=0.0, diarize=diarize)
+        else:
+            chunks = split_chunks(data, rate, self.chunk_seconds, self.overlap_seconds)
+            segments = []
+            language = None
+            for i, chunk in enumerate(chunks):
+                offset = i * (self.chunk_seconds - self.overlap_seconds)
+                result = self._transcribe_chunk(chunk, rate, prompt, word_timestamps, offset, diarize)
+                segments.extend(result.segments)
+                language = language or result.language
 
-        chunks = split_chunks(data, rate, self.chunk_seconds, self.overlap_seconds)
-        segments = []
-        language = None
-        for i, chunk in enumerate(chunks):
-            offset = i * (self.chunk_seconds - self.overlap_seconds)
-            result = self._transcribe_chunk(chunk, rate, prompt, word_timestamps, offset)
-            segments.extend(result.segments)
-            language = language or result.language
+            text = " ".join(s.text for s in segments if s.text)
+            result = TranscriptionResult(text=text, segments=segments, language=language, duration=duration)
 
-        text = " ".join(s.text for s in segments if s.text)
-        return TranscriptionResult(text=text, segments=segments, language=language, duration=duration)
+        if diarize and self.hf_token is not None:
+            from whisper_tools.diarize import Diarizer, assign_speakers
+
+            diarizer = Diarizer(hf_token=self.hf_token)
+            turns = diarizer.diarize(audio, sample_rate=rate)
+            assign_speakers(result.segments, turns)
+
+        if converted_temp is not None:
+            cleanup_temp(converted_temp)
+        return result
 
     def _transcribe_chunk(
         self,
@@ -125,6 +146,7 @@ class WhisperLocal:
         prompt: tp.Optional[str],
         word_timestamps: bool,
         offset: float,
+        diarize: bool = False,
     ) -> TranscriptionResult:
         kwargs = {
             "language": self.language,
@@ -151,12 +173,20 @@ class WhisperLocal:
             )
 
         text = " ".join(s.text for s in segments if s.text)
-        return TranscriptionResult(
+        result = TranscriptionResult(
             text=text,
             segments=segments,
             language=info.language,
             duration=len(audio) / sample_rate,
         )
+
+        if diarize and self.hf_token is not None:
+            from whisper_tools.diarize import Diarizer, assign_speakers
+            diarizer = Diarizer(hf_token=self.hf_token)
+            turns = diarizer.diarize(audio, sample_rate=sample_rate)
+            assign_speakers(result.segments, turns)
+
+        return result
 
     def transcribe_many(
         self,
@@ -189,6 +219,7 @@ class WhisperLocal:
                 chunk_seconds=self.chunk_seconds,
                 overlap_seconds=self.overlap_seconds,
                 noise_reduction=self.noise_reduction,
+                hf_token=self.hf_token,
             )
             return worker.transcribe(path)
 
